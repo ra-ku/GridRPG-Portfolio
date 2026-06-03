@@ -41,6 +41,14 @@ GridRPG는 타일 위에서 유닛의 위치와 방향을 활용해 행동하는
 - 타운별 타일 개수, 간격, 시작 위치를 데이터로 관리
 - 프리팹 키와 타일 인덱스를 이용한 플레이어 및 NPC 스폰
 - 스폰 데이터에서 유닛 방향과 위치 오프셋 설정
+- 전투별 유닛과 복귀 포털 스폰 정보를 `BattleSpawnDatabase`로 관리
+
+### 타운-전투 코어 루프
+
+- 타운 포털을 통해 전투 씬으로 진입
+- 전투 승리 후 즉시 씬을 이동하지 않고, 전투 씬 안에서 타운 조작 모드로 전환
+- 복귀 포털을 밟으면 이전 타운 씬으로 돌아가는 기본 흐름 구현
+- 전투 중에는 포털이 작동하지 않도록 입력 모드와 전투 상태를 함께 검사
 
 ### 카메라 및 애니메이션
 
@@ -57,19 +65,24 @@ GridRPG는 타일 위에서 유닛의 위치와 방향을 활용해 행동하는
 flowchart TD
     Managers["Managers<br/>전역 서비스 컨테이너"]
     Global["Input / Data / Camera / Grid / UnitRegistry"]
+    Flow["GameFlowManager<br/>씬 흐름 관리"]
     BattleContext["BattleContext<br/>전투 조립 지점"]
     TownContext["TownContext<br/>타운 조립 지점"]
-    BattleManagers["SpawnManager / TurnManager / BattleManager"]
+    BattleManagers["BattleSpawnManager / TurnManager / BattleManager"]
     TownManagers["TownSpawnManager / TownTurnManager"]
 
     Managers --> Global
+    Managers --> Flow
     Global --> BattleContext
     Global --> TownContext
+    Flow --> BattleContext
+    Flow --> TownContext
     BattleContext --> BattleManagers
     TownContext --> TownManagers
 ```
 
 - `Managers`는 입력, 데이터, 카메라처럼 씬이 바뀌어도 유지되는 서비스를 관리합니다.
+- `GameFlowManager`는 타운에서 전투로 진입하고, 전투 종료 후 돌아갈 타운을 기억하는 흐름을 담당합니다.
 - `BattleContext`는 전투씬에서만 필요한 매니저를 생성하고 연결합니다.
 - `TownContext`는 타운씬의 그리드 생성, 액터 스폰, 타운 턴 흐름을 관리합니다.
 - `UnitRegistry`는 유닛 목록과 등록 상태만 관리하며, 승패 판단은 `BattleManager`가 담당합니다.
@@ -126,6 +139,29 @@ Google Sheets의 타운 맵 및 스폰 데이터를 읽어 그리드와 액터�
 - 프리팹 키를 통해 데이터와 Unity 에셋 연결
 - 타운 추가 시 코드 변경 범위 감소
 
+### 5. 전투 진입과 복귀 흐름 분리
+
+전투 승리 즉시 타운으로 씬을 전환하면 전투 종료 후 보상, 잔여 탐색, 복귀 선택 같은 흐름을 넣기 어렵습니다.
+`BattleManager`는 승리 조건과 전투 종료 상태만 판단하고, `GameFlowManager`가 씬 흐름을 관리하도록 분리했습니다.
+
+**구현 내용**
+
+- `BattlePortal`을 통해 타운에서 전투 씬으로 진입
+- 전투 승리 시 `BattleState.BattleEnd`로 전환한 뒤 플레이어 조작을 타운 모드로 변경
+- 전투 씬의 복귀 포털은 `InputMode.Town`이고 전투가 종료된 상태일 때만 작동
+- `SceneManagerEx`를 일반 `IManager`로 정리하여 전역 매니저 컨테이너에서 안정적으로 등록
+
+### 6. 죽은 유닛의 타일 점유 해제
+
+유닛이 사망해도 타일 점유 정보가 남아 있으면 `MoveAction`이 해당 타일을 `Occupied`로 판단해 이동할 수 없습니다.
+사망 이벤트로 `UnitRegistry`에서 유닛을 등록 해제할 때 현재 타일 참조를 정리하고, 죽은 유닛은 이동 차단 대상으로 계산하지 않도록 변경했습니다.
+
+**결과**
+
+- 죽은 유닛이 있던 타일이 이동 가능한 상태로 전환
+- `UnitRegistry`는 등록 해제와 이벤트 알림을 담당하고, 타일 참조 정리는 `Unit`이 수행
+- 사망 애니메이션을 위해 오브젝트가 잠시 남아 있어도 이동 판정에는 영향을 주지 않음
+
 ## 현재 개발 상태
 
 | 상태 | 기능 |
@@ -133,14 +169,16 @@ Google Sheets의 타운 맵 및 스폰 데이터를 읽어 그리드와 액터�
 | 구현 완료 | 전투 그리드, 유닛 스폰, 플레이어 및 적 턴, 이동, 방향 전환, 일반 공격, 밀치기 공격 |
 | 구현 완료 | 전투 카메라 전환, 적 의도, 유닛 사망, 적 전멸 승리 조건 |
 | 구현 완료 | 타운 데이터 로드, 타운 그리드 및 액터 스폰, 자유 이동, 타운 턴, NPC 의도 |
-| 개발 중 | 찌르기 공격, 대화 UI, 상호작용 및 포털, 타운과 전투 사이의 완전한 게임 루프 |
+| 구현 완료 | 타운 포털 전투 진입, 전투 승리 후 복귀 포털을 통한 타운 복귀 |
+| 구현 완료 | `BattleSpawnDatabase` 기반 전투 유닛 및 포털 스폰 |
+| 개발 중 | 찌르기 공격, 대화 UI, 상호작용 확장, 전투 결과 보상 흐름 |
 | 개선 예정 | 플레이 영상과 스크린샷, 핵심 코드 샘플, 자동화 테스트, 빌드 설정 정리 |
 
 ## 개발 방향
 
-- 타운 탐색에서 전투 진입, 전투 종료 후 타운 복귀까지 이어지는 플레이 루프 완성
+- 전투 승리 후 보상, 결과 UI, 다음 목표 안내 흐름 추가
 - 액션 종류와 적 행동 패턴 확장
-- 대화, 상호작용, 포털 시스템 구현
+- 대화와 상호작용 시스템 확장
 - 핵심 매니저와 턴 흐름에 대한 테스트 추가
 - 플레이 영상과 구조도를 활용한 포트폴리오 문서 개선
 
