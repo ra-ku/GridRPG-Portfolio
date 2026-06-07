@@ -74,7 +74,7 @@ flowchart TD
     B --> C["ScenePortal 또는 DoorSceneTransition"]
     C --> D["SceneTransitionManager"]
     D --> E["PortalDestinationDatabase 조회"]
-    E --> F{ "MoveType" }
+    E --> F{MoveType}
     F -->|SceneMove| G["GameFlowManager.MoveToScene"]
     F -->|StartBattle| H["GameFlowManager.StartBattle"]
     F -->|ReturnToTown| I["GameFlowManager.ReturnToTown"]
